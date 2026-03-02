@@ -42,6 +42,7 @@
 #include "nfs_file_handle.h"
 #include "sal_functions.h"
 #include "fsal.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -77,6 +78,10 @@ enum nfs_req_result nfs4_op_remove(struct nfs_argop4 *op, compound_data_t *data,
 			    TP_UTF8STR_TRUNCATED(arg_REMOVE4->target));
 
 	resp->resop = NFS4_OP_REMOVE;
+
+	/* Dispatch to xattr handler if current FH is an xattr dir */
+	if (nfs4_Is_Fh_Xattr_Dir(&data->currentFH))
+		return nfs4_op_remove_xattr(op, data, resp);
 
 	fsal_prepare_attrs(&parent_pre_attrs, ATTR_CHANGE);
 	fsal_prepare_attrs(&parent_post_attrs, ATTR_CHANGE);

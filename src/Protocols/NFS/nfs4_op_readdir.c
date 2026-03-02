@@ -35,6 +35,7 @@
 #include "nfs_file_handle.h"
 #include "nfs_convert.h"
 #include "export_mgr.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -577,6 +578,10 @@ enum nfs_req_result nfs4_op_readdir(struct nfs_argop4 *op,
 
 	resp->resop = NFS4_OP_READDIR;
 	res_READDIR4->status = NFS4_OK;
+
+	/* Dispatch to xattr handler if current FH is an xattr dir */
+	if (nfs4_Is_Fh_Xattr_Dir(&data->currentFH))
+		return nfs4_op_readdir_xattr(op, data, resp);
 
 	res_READDIR4->status = nfs4_sanity_check_FH(data, DIRECTORY, false);
 

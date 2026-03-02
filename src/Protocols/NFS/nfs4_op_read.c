@@ -51,6 +51,7 @@
 #include "nfs_exports.h"
 #include "gsh_rpc.h"
 #include "nfs_qos.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -1071,6 +1072,10 @@ enum nfs_req_result nfs4_op_read(struct nfs_argop4 *op, compound_data_t *data,
 
 	/* Say we are managing NFS4_OP_READ */
 	resp->resop = NFS4_OP_READ;
+
+	/* Dispatch to xattr handler if current FH is an xattr obj */
+	if (nfs4_Is_Fh_Xattr_Obj(&data->currentFH))
+		return nfs4_op_read_xattr(op, data, resp);
 
 	if ((data->minorversion > 0) && nfs4_Is_Fh_DSHandle(&data->currentFH)) {
 		/* DS handle, call op_dsread */

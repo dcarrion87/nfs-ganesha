@@ -137,12 +137,38 @@ static int nfs4_mds_putfh(compound_data_t *data)
 	struct fsal_obj_handle *new_hdl;
 	fsal_status_t fsal_status = { 0, 0 };
 	bool changed = true;
+	uint8_t xattr_flags;
+	uint8_t parent_fs_len;
+	uint8_t saved_fhflags1;
+
+	/* Detect and save xattr handle flags */
+	xattr_flags = v4_handle->fhflags1 &
+		      (FILE_HANDLE_V4_FLAG_XATTR_DIR |
+		       FILE_HANDLE_V4_FLAG_XATTR_OBJ);
+	saved_fhflags1 = v4_handle->fhflags1;
+
+	/*
+	 * For xattr handles, compute the parent's fs_len. The FSAL only
+	 * knows about the parent object, so we must strip the xattr
+	 * portion before wire_to_host / create_handle.
+	 */
+	if (xattr_flags & FILE_HANDLE_V4_FLAG_XATTR_OBJ) {
+		/* Xattr obj: fsopaque = parent + [name][name_len] */
+		uint8_t name_len = v4_handle->fsopaque[v4_handle->fs_len - 1];
+
+		parent_fs_len = v4_handle->fs_len - 1 - name_len;
+	} else {
+		/* Xattr dir or normal: fsopaque is just parent's */
+		parent_fs_len = v4_handle->fs_len;
+	}
 
 	LogFullDebug(COMPONENT_FILEHANDLE,
-		     "NFS4 Handle flags 0x%X export id %d", v4_handle->fhflags1,
-		     ntohs(v4_handle->id.exports));
+		     "NFS4 Handle flags 0x%X export id %d%s",
+		     v4_handle->fhflags1, ntohs(v4_handle->id.exports),
+		     xattr_flags ? " (xattr handle)" : "");
 	LogFullDebugOpaque(COMPONENT_FILEHANDLE, "NFS4 FSAL Handle %s",
-			   LEN_FH_STR, v4_handle->fsopaque, v4_handle->fs_len);
+			   LEN_FH_STR, v4_handle->fsopaque,
+			   parent_fs_len);
 
 	/* Find any existing export by the "id" from the handle,
 	 * before releasing the old export (to prevent thrashing).
@@ -197,15 +223,21 @@ static int nfs4_mds_putfh(compound_data_t *data)
 	 * but there is no such limit on a host handle. Here, we assume that as
 	 * the size limit. Eventually it might be nice to call into the FSAL to
 	 * ask how large a buffer it needs for a host handle.
+	 *
+	 * For xattr handles, only copy the parent's portion of fsopaque.
 	 */
-	memcpy(fhbuf, &v4_handle->fsopaque, v4_handle->fs_len);
-	fh_desc.len = v4_handle->fs_len;
+	memcpy(fhbuf, &v4_handle->fsopaque, parent_fs_len);
+	fh_desc.len = parent_fs_len;
 	fh_desc.addr = fhbuf;
 
-	/* adjust the handle opaque into a cache key */
+	/* adjust the handle opaque into a cache key.
+	 * Strip xattr flags so the FSAL doesn't see them.
+	 */
 	fsal_status = export->exp_ops.wire_to_host(export, FSAL_DIGEST_NFSV4,
 						   &fh_desc,
-						   v4_handle->fhflags1);
+						   saved_fhflags1 &
+						   ~(FILE_HANDLE_V4_FLAG_XATTR_DIR |
+						     FILE_HANDLE_V4_FLAG_XATTR_OBJ));
 	if (FSAL_IS_ERROR(fsal_status)) {
 		LogInfo(COMPONENT_FILEHANDLE, "wire_to_host failed %s",
 			msg_fsal_err(fsal_status.major));
@@ -227,9 +259,27 @@ static int nfs4_mds_putfh(compound_data_t *data)
 	/* Put our ref */
 	new_hdl->obj_ops->put_ref(new_hdl);
 
-	LogFullDebug(COMPONENT_FILEHANDLE, "File handle is of type %s(%d)",
-		     object_file_type_to_str(data->current_filetype),
-		     data->current_filetype);
+	/*
+	 * For xattr handles, override the filetype. The current_obj
+	 * still points to the parent, which is correct -- all xattr
+	 * operations operate on the parent's xattrs.
+	 */
+	if (xattr_flags & FILE_HANDLE_V4_FLAG_XATTR_DIR) {
+		data->current_filetype = DIRECTORY;
+		LogFullDebug(COMPONENT_FILEHANDLE,
+			     "xattr dir handle resolved, parent type %s",
+			     object_file_type_to_str(new_hdl->type));
+	} else if (xattr_flags & FILE_HANDLE_V4_FLAG_XATTR_OBJ) {
+		data->current_filetype = REGULAR_FILE;
+		LogFullDebug(COMPONENT_FILEHANDLE,
+			     "xattr obj handle resolved, parent type %s",
+			     object_file_type_to_str(new_hdl->type));
+	} else {
+		LogFullDebug(COMPONENT_FILEHANDLE,
+			     "File handle is of type %s(%d)",
+			     object_file_type_to_str(data->current_filetype),
+			     data->current_filetype);
+	}
 
 	return NFS4_OK;
 }

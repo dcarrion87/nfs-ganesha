@@ -63,7 +63,7 @@ struct mem_fsal_module
 				  .symlink_support = true,
 				  .lock_support = false,
 				  .lock_support_async_block = false,
-				  .named_attr = false,
+				  .named_attr = true,
 				  .unique_handles = true,
 				  .acl_support = 0,
 				  .cansettime = true,

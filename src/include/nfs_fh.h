@@ -44,6 +44,8 @@
 
 #define GANESHA_FH_VERSION 0x43
 #define FILE_HANDLE_V4_FLAG_DS 0x01 /*< handle for a DS */
+#define FILE_HANDLE_V4_FLAG_XATTR_DIR 0x02 /*< xattr directory handle */
+#define FILE_HANDLE_V4_FLAG_XATTR_OBJ 0x04 /*< xattr entry handle */
 #define FH_FSAL_BIG_ENDIAN 0x40 /*< FSAL FH is big endian */
 
 /**

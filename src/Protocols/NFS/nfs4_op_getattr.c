@@ -45,6 +45,7 @@
 #include "nfs_file_handle.h"
 #include "nfs_convert.h"
 #include "sal_functions.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -89,6 +90,10 @@ enum nfs_req_result nfs4_op_getattr(struct nfs_argop4 *op,
 
 	/* This is a NFS4_OP_GETTAR */
 	resp->resop = NFS4_OP_GETATTR;
+
+	/* Dispatch to xattr handler if current FH is an xattr handle */
+	if (nfs4_Is_Fh_Xattr(&data->currentFH))
+		return nfs4_op_getattr_xattr(op, data, resp);
 
 	/* Do basic checks on a filehandle */
 	res_GETATTR4->status = nfs4_sanity_check_FH(data, NO_FILE_TYPE, false);

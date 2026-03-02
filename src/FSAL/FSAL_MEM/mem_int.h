@@ -84,6 +84,16 @@ struct mem_state_fd {
 };
 
 /*
+ * MEM internal xattr entry
+ */
+struct mem_xattr {
+	struct glist_head entry;  /**< Link into obj's xattr list */
+	char *name;               /**< xattr name */
+	char *value;              /**< xattr value */
+	size_t value_len;         /**< Length of value */
+};
+
+/*
  * MEM internal object handle
  */
 
@@ -117,6 +127,7 @@ struct mem_fsal_obj_handle {
 	struct glist_head mfo_exp_entry; /**< Link into mfs_objs */
 	struct mem_fsal_export *mfo_exp; /**< Export owning object */
 	char *m_name; /**< Base name of obj, for debugging */
+	struct glist_head mh_xattrs; /**< List of xattrs on this object */
 	uint32_t datasize;
 	bool is_export;
 	uint32_t refcount; /**< We persist handles, so we need a refcount */
@@ -177,12 +188,25 @@ const char *str_async_type(uint32_t async_type);
  */
 static inline void _mem_free_handle(struct mem_fsal_obj_handle *hdl)
 {
+	struct glist_head *glist, *glistn;
+
 	glist_del(&hdl->mfo_exp_entry);
 	hdl->mfo_exp = NULL;
 
 	if (hdl->m_name != NULL) {
 		gsh_free(hdl->m_name);
 		hdl->m_name = NULL;
+	}
+
+	/* Free all xattrs */
+	glist_for_each_safe(glist, glistn, &hdl->mh_xattrs) {
+		struct mem_xattr *xa =
+			glist_entry(glist, struct mem_xattr, entry);
+
+		glist_del(&xa->entry);
+		gsh_free(xa->name);
+		gsh_free(xa->value);
+		gsh_free(xa);
 	}
 
 	gsh_free(hdl);

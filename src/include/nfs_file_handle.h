@@ -225,6 +225,94 @@ static inline int nfs4_Is_Fh_Empty(nfs_fh4 *pfh)
 	return NFS4_OK;
 } /* nfs4_Is_Fh_Empty */
 
+/**
+ * @brief Test if an NFS v4 file handle is an xattr handle (dir or obj).
+ */
+static inline int nfs4_Is_Fh_Xattr(nfs_fh4 *fh)
+{
+	file_handle_v4_t *fhandle4;
+
+	if (fh == NULL || fh->nfs_fh4_len == 0)
+		return 0;
+
+	fhandle4 = (file_handle_v4_t *)(fh->nfs_fh4_val);
+
+	return (fhandle4->fhflags1 &
+		(FILE_HANDLE_V4_FLAG_XATTR_DIR |
+		 FILE_HANDLE_V4_FLAG_XATTR_OBJ)) != 0;
+}
+
+/**
+ * @brief Test if an NFS v4 file handle is an xattr directory handle.
+ */
+static inline int nfs4_Is_Fh_Xattr_Dir(nfs_fh4 *fh)
+{
+	file_handle_v4_t *fhandle4;
+
+	if (fh == NULL || fh->nfs_fh4_len == 0)
+		return 0;
+
+	fhandle4 = (file_handle_v4_t *)(fh->nfs_fh4_val);
+
+	return (fhandle4->fhflags1 & FILE_HANDLE_V4_FLAG_XATTR_DIR) != 0;
+}
+
+/**
+ * @brief Test if an NFS v4 file handle is an xattr object handle.
+ */
+static inline int nfs4_Is_Fh_Xattr_Obj(nfs_fh4 *fh)
+{
+	file_handle_v4_t *fhandle4;
+
+	if (fh == NULL || fh->nfs_fh4_len == 0)
+		return 0;
+
+	fhandle4 = (file_handle_v4_t *)(fh->nfs_fh4_val);
+
+	return (fhandle4->fhflags1 & FILE_HANDLE_V4_FLAG_XATTR_OBJ) != 0;
+}
+
+/**
+ * @brief Extract xattr name from an xattr obj handle.
+ *
+ * Xattr obj handle layout in fsopaque:
+ *   [parent_fsopaque][xattr_name (N bytes)][name_len: 1 byte]
+ *
+ * @param[in]  fh       The xattr obj file handle
+ * @param[out] name     Pointer set to xattr name within handle (not NUL-terminated)
+ * @param[out] name_len Length of the xattr name
+ *
+ * @return true on success, false if handle is malformed
+ */
+static inline bool nfs4_xattr_obj_name(nfs_fh4 *fh, const char **name,
+					uint8_t *name_len)
+{
+	file_handle_v4_t *v4 = (file_handle_v4_t *)(fh->nfs_fh4_val);
+	uint8_t nlen;
+
+	if (v4->fs_len < 2)
+		return false;
+
+	nlen = v4->fsopaque[v4->fs_len - 1];
+	if (nlen == 0 || nlen + 1 > v4->fs_len)
+		return false;
+
+	*name_len = nlen;
+	*name = (const char *)&v4->fsopaque[v4->fs_len - 1 - nlen];
+	return true;
+}
+
+/**
+ * @brief Get the parent's fs_len from an xattr obj handle.
+ */
+static inline uint8_t nfs4_xattr_obj_parent_fs_len(nfs_fh4 *fh)
+{
+	file_handle_v4_t *v4 = (file_handle_v4_t *)(fh->nfs_fh4_val);
+	uint8_t nlen = v4->fsopaque[v4->fs_len - 1];
+
+	return v4->fs_len - 1 - nlen;
+}
+
 /* NFSv4 specific FH related functions */
 int nfs4_Is_Fh_Invalid(nfs_fh4 *);
 int nfs4_Is_Fh_DSHandle(nfs_fh4 *);

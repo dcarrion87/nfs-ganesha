@@ -46,6 +46,7 @@
 #include "nfs_convert.h"
 #include "nfs_file_handle.h"
 #include "nfs_proto_tools.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -77,6 +78,14 @@ enum nfs_req_result nfs4_op_access(struct nfs_argop4 *op, compound_data_t *data,
 
 	GSH_AUTO_TRACEPOINT(nfs4, op_access_start, TRACE_INFO,
 			    "ACCESS arg: access={}", arg_ACCESS4->access);
+
+	/* Dispatch to xattr handler for xattr handles -- the standard
+	 * handler checks data->current_obj (the parent file), which has
+	 * the wrong type for xattr dir/obj handles.
+	 */
+	if (nfs4_Is_Fh_Xattr_Dir(&data->currentFH) ||
+	    nfs4_Is_Fh_Xattr_Obj(&data->currentFH))
+		return nfs4_op_access_xattr(op, data, resp);
 
 	/* xattrs are a v4.2+ feature */
 	if (data->minorversion >= 2) {

@@ -1,0 +1,10 @@
+services:
+  nfs-ganesha:
+    build: .
+    image: nfs-ganesha-dev
+    privileged: true
+    ports:
+      - "12049:2049"
+    volumes:
+      - ./.tmp:/var/log/ganesha
+    command: /usr/local/bin/start-server.sh

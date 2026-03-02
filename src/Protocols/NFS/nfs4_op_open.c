@@ -45,6 +45,7 @@
 #include "nfs_creds.h"
 #include "export_mgr.h"
 #include "nfs_rpc_callback.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -1423,6 +1424,19 @@ enum nfs_req_result nfs4_op_open(struct nfs_argop4 *op, compound_data_t *data,
 	if (!open4_open_owner(op, data, resp, clientid, &owner)) {
 		LogDebug(COMPONENT_NFS_V4, "open4_open_owner failed");
 		goto out2;
+	}
+
+	/* Dispatch to xattr handler if current FH is an xattr handle.
+	 * This must be AFTER open4_open_owner() so the seqid is properly
+	 * checked and tracked (macOS sends OPEN on xattr dirs with real
+	 * seqids that must be accounted for).  We then goto out so that
+	 * Copy_nfs4_state_req() saves the seqid for replay detection.
+	 */
+	if (nfs4_Is_Fh_Xattr(&data->currentFH)) {
+		nfs4_op_open_xattr(op, data, resp);
+		obj_change = data->current_obj;
+		obj_change->obj_ops->get_ref(obj_change);
+		goto out;
 	}
 
 	/* Do the claim check here, so we can save the result in the

@@ -55,6 +55,7 @@ SET(nfsproto_STAT_SRCS
    nfs4_op_open_confirm.c
    nfs4_op_open_downgrade.c
    nfs4_op_openattr.c
+   nfs4_xattr_handle_ops.c
    nfs4_op_putfh.c
    nfs4_op_putpubfh.c
    nfs4_op_putrootfh.c

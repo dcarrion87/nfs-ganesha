@@ -45,6 +45,7 @@
 #include "server_stats.h"
 #include "export_mgr.h"
 #include "nfs_qos.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -358,6 +359,10 @@ enum nfs_req_result nfs4_op_write(struct nfs_argop4 *op, compound_data_t *data,
 	/* Lock are not supported */
 	resp->resop = NFS4_OP_WRITE;
 	res_WRITE4->status = NFS4_OK;
+
+	/* Dispatch to xattr handler if current FH is an xattr obj */
+	if (nfs4_Is_Fh_Xattr_Obj(&data->currentFH))
+		return nfs4_op_write_xattr(op, data, resp);
 
 	if ((data->minorversion > 0) &&
 	    (nfs4_Is_Fh_DSHandle(&data->currentFH))) {

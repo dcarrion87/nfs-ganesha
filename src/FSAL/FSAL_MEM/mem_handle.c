@@ -721,6 +721,7 @@ static struct mem_fsal_obj_handle *_mem_alloc_handle(
 	hdl->obj_handle.fileid = atomic_postinc_uint64_t(&mem_inode_number);
 	hdl->datasize = MEM.inode_size;
 	glist_init(&hdl->dirents);
+	glist_init(&hdl->mh_xattrs);
 	PTHREAD_RWLOCK_wrlock(&mfe->mfe_exp_lock);
 	glist_add_tail(&mfe->mfe_objs, &hdl->mfo_exp_entry);
 	hdl->mfo_exp = mfe;
@@ -2499,6 +2500,159 @@ static fsal_status_t mem_merge(struct fsal_obj_handle *old_hdl,
 	return status;
 }
 
+/**
+ * @brief Find an xattr by name on a MEM object.
+ */
+static struct mem_xattr *mem_find_xattr(struct mem_fsal_obj_handle *hdl,
+					const char *name, size_t name_len)
+{
+	struct glist_head *glist;
+
+	glist_for_each(glist, &hdl->mh_xattrs) {
+		struct mem_xattr *xa =
+			glist_entry(glist, struct mem_xattr, entry);
+
+		if (strlen(xa->name) == name_len &&
+		    memcmp(xa->name, name, name_len) == 0)
+			return xa;
+	}
+	return NULL;
+}
+
+/**
+ * @brief Get an xattr value.
+ */
+static fsal_status_t mem_getxattrs(struct fsal_obj_handle *obj_hdl,
+				   xattrkey4 *xa_name, xattrvalue4 *xa_value)
+{
+	struct mem_fsal_obj_handle *hdl =
+		container_of(obj_hdl, struct mem_fsal_obj_handle, obj_handle);
+	struct mem_xattr *xa;
+
+	xa = mem_find_xattr(hdl, xa_name->utf8string_val,
+			    xa_name->utf8string_len);
+	if (xa == NULL)
+		return fsalstat(ERR_FSAL_NOXATTR, 0);
+
+	/* Size probe: caller passes len=0 to discover size */
+	if (xa_value->utf8string_len == 0) {
+		xa_value->utf8string_len = xa->value_len;
+		return fsalstat(ERR_FSAL_NO_ERROR, 0);
+	}
+
+	/* Buffer too small */
+	if (xa_value->utf8string_len < xa->value_len) {
+		xa_value->utf8string_len = xa->value_len;
+		return fsalstat(ERR_FSAL_XATTR2BIG, 0);
+	}
+
+	memcpy(xa_value->utf8string_val, xa->value, xa->value_len);
+	xa_value->utf8string_len = xa->value_len;
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief Set an xattr value.
+ */
+static fsal_status_t mem_setxattrs(struct fsal_obj_handle *obj_hdl,
+				   setxattr_option4 option,
+				   xattrkey4 *xa_name,
+				   xattrvalue4 *xa_value)
+{
+	struct mem_fsal_obj_handle *hdl =
+		container_of(obj_hdl, struct mem_fsal_obj_handle, obj_handle);
+	struct mem_xattr *xa;
+
+	xa = mem_find_xattr(hdl, xa_name->utf8string_val,
+			    xa_name->utf8string_len);
+
+	if (option == SETXATTR4_CREATE && xa != NULL)
+		return fsalstat(ERR_FSAL_EXIST, 0);
+	if (option == SETXATTR4_REPLACE && xa == NULL)
+		return fsalstat(ERR_FSAL_NOXATTR, 0);
+
+	if (xa != NULL) {
+		/* Replace existing value */
+		gsh_free(xa->value);
+		xa->value = gsh_malloc(xa_value->utf8string_len);
+		memcpy(xa->value, xa_value->utf8string_val,
+		       xa_value->utf8string_len);
+		xa->value_len = xa_value->utf8string_len;
+	} else {
+		/* Create new xattr */
+		xa = gsh_calloc(1, sizeof(struct mem_xattr));
+		xa->name = gsh_malloc(xa_name->utf8string_len + 1);
+		memcpy(xa->name, xa_name->utf8string_val,
+		       xa_name->utf8string_len);
+		xa->name[xa_name->utf8string_len] = '\0';
+		xa->value = gsh_malloc(xa_value->utf8string_len);
+		memcpy(xa->value, xa_value->utf8string_val,
+		       xa_value->utf8string_len);
+		xa->value_len = xa_value->utf8string_len;
+		glist_add_tail(&hdl->mh_xattrs, &xa->entry);
+	}
+
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief Remove an xattr.
+ */
+static fsal_status_t mem_removexattrs(struct fsal_obj_handle *obj_hdl,
+				      xattrkey4 *xa_name)
+{
+	struct mem_fsal_obj_handle *hdl =
+		container_of(obj_hdl, struct mem_fsal_obj_handle, obj_handle);
+	struct mem_xattr *xa;
+
+	xa = mem_find_xattr(hdl, xa_name->utf8string_val,
+			    xa_name->utf8string_len);
+	if (xa == NULL)
+		return fsalstat(ERR_FSAL_NOXATTR, 0);
+
+	glist_del(&xa->entry);
+	gsh_free(xa->name);
+	gsh_free(xa->value);
+	gsh_free(xa);
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief List xattrs on an object.
+ *
+ * Builds a null-separated buffer of "user.<name>" strings and delegates
+ * to fsal_listxattr_helper() for cookie-based pagination.
+ */
+static fsal_status_t mem_listxattrs(struct fsal_obj_handle *obj_hdl,
+				    count4 la_maxcount,
+				    nfs_cookie4 *la_cookie,
+				    bool_t *lr_eof,
+				    xattrlist4 *lr_names)
+{
+	struct mem_fsal_obj_handle *hdl =
+		container_of(obj_hdl, struct mem_fsal_obj_handle, obj_handle);
+	struct glist_head *glist;
+	char buf[MAXPATHLEN];
+	size_t offset = 0;
+
+	/* Build null-separated list of "user.<name>" entries */
+	glist_for_each(glist, &hdl->mh_xattrs) {
+		struct mem_xattr *xa =
+			glist_entry(glist, struct mem_xattr, entry);
+		size_t prefixed_len = strlen("user.") + strlen(xa->name) + 1;
+
+		if (offset + prefixed_len > sizeof(buf))
+			break;
+
+		snprintf(buf + offset, sizeof(buf) - offset,
+			 "user.%s", xa->name);
+		offset += prefixed_len;
+	}
+
+	return fsal_listxattr_helper(buf, offset, la_maxcount,
+				     la_cookie, lr_eof, lr_names);
+}
+
 void mem_handle_ops_init(struct fsal_obj_ops *ops)
 {
 	fsal_default_obj_ops_init(ops);
@@ -2528,6 +2682,10 @@ void mem_handle_ops_init(struct fsal_obj_ops *ops)
 	ops->reopen_func = mem_reopen_func;
 	ops->handle_to_wire = mem_handle_to_wire;
 	ops->handle_to_key = mem_handle_to_key;
+	ops->getxattrs = mem_getxattrs;
+	ops->setxattrs = mem_setxattrs;
+	ops->listxattrs = mem_listxattrs;
+	ops->removexattrs = mem_removexattrs;
 }
 
 /* export methods that create object handles

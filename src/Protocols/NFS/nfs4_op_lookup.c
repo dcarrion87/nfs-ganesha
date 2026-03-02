@@ -43,6 +43,7 @@
 #include "nfs_convert.h"
 #include "export_mgr.h"
 #include "nfs_proto_functions.h"
+#include "nfs4_xattr_handle_ops.h"
 
 #include "gsh_lttng/gsh_lttng.h"
 #if defined(USE_LTTNG) && !defined(LTTNG_PARSING)
@@ -84,6 +85,10 @@ enum nfs_req_result nfs4_op_lookup(struct nfs_argop4 *op, compound_data_t *data,
 
 	resp->resop = NFS4_OP_LOOKUP;
 	res_LOOKUP4->status = NFS4_OK;
+
+	/* Dispatch to xattr handler if current FH is an xattr dir */
+	if (nfs4_Is_Fh_Xattr_Dir(&data->currentFH))
+		return nfs4_op_lookup_xattr(op, data, resp);
 
 	/* Do basic checks on a filehandle */
 	res_LOOKUP4->status = nfs4_sanity_check_FH(data, DIRECTORY, false);

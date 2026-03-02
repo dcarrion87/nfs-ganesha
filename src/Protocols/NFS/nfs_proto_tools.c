@@ -39,6 +39,7 @@
 #include "nfs_convert.h"
 #include "nfs_exports.h"
 #include "nfs_proto_tools.h"
+#include "nfs_file_handle.h"
 #include "nfs4_acls.h"
 #include "idmapper.h"
 #include "export_mgr.h"
@@ -437,32 +438,39 @@ static fattr_xdr_result encode_type(XDR *xdr, struct xdr_attrs_args *args)
 {
 	uint32_t file_type;
 
-	switch (args->attrs->type) {
-	case REGULAR_FILE:
-	case EXTENDED_ATTR:
-		file_type = NF4REG; /* Regular file */
-		break;
-	case DIRECTORY:
-		file_type = NF4DIR; /* Directory */
-		break;
-	case BLOCK_FILE:
-		file_type = NF4BLK; /* Special File - block device */
-		break;
-	case CHARACTER_FILE:
-		file_type = NF4CHR; /* Special File - character device */
-		break;
-	case SYMBOLIC_LINK:
-		file_type = NF4LNK; /* Symbolic Link */
-		break;
-	case SOCKET_FILE:
-		file_type = NF4SOCK; /* Special File - socket */
-		break;
-	case FIFO_FILE:
-		file_type = NF4FIFO; /* Special File - fifo */
-		break;
-	default: /* includes NO_FILE_TYPE & FS_JUNCTION: */
-		return FATTR_XDR_FAILED; /* silently skip bogus? */
-	} /* switch( pattr->type ) */
+	/* Named attribute handles use NF4ATTRDIR/NF4NAMEDATTR (RFC 5661) */
+	if (args->hdl4 && nfs4_Is_Fh_Xattr_Dir(args->hdl4)) {
+		file_type = NF4ATTRDIR;
+	} else if (args->hdl4 && nfs4_Is_Fh_Xattr_Obj(args->hdl4)) {
+		file_type = NF4NAMEDATTR;
+	} else {
+		switch (args->attrs->type) {
+		case REGULAR_FILE:
+		case EXTENDED_ATTR:
+			file_type = NF4REG; /* Regular file */
+			break;
+		case DIRECTORY:
+			file_type = NF4DIR; /* Directory */
+			break;
+		case BLOCK_FILE:
+			file_type = NF4BLK; /* Special File - block device */
+			break;
+		case CHARACTER_FILE:
+			file_type = NF4CHR; /* Special File - character device */
+			break;
+		case SYMBOLIC_LINK:
+			file_type = NF4LNK; /* Symbolic Link */
+			break;
+		case SOCKET_FILE:
+			file_type = NF4SOCK; /* Special File - socket */
+			break;
+		case FIFO_FILE:
+			file_type = NF4FIFO; /* Special File - fifo */
+			break;
+		default: /* includes NO_FILE_TYPE & FS_JUNCTION: */
+			return FATTR_XDR_FAILED;
+		}
+	}
 	if (!xdr_u_int32_t(xdr, &file_type))
 		return FATTR_XDR_FAILED;
 	return FATTR_XDR_SUCCESS;
